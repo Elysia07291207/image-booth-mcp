@@ -4,7 +4,7 @@
 
 不用显卡、不用装模型、不用下十几个 G。装上去，跟 Agent 说一句「画一张……」，图就出来。
 
-一份代码 12 KB，零依赖，零构建。
+一份代码约 14 KB，零依赖，零构建。
 
 ---
 
@@ -14,9 +14,9 @@
 
 ### 顺手回答一个问题：为什么不做成网页？
 
-网页版最大的枷锁是 **CORS**：浏览器只能连那些主动开了跨域的厂商，能不能用取决于厂商的心情（实测：阿里云百炼和火山方舟开了，别家不一定）。
+网页版最大的枷锁是 **CORS**：浏览器只能连那些主动开了跨域的厂商，能不能用取决于厂商的心情。MCP 是本地进程，**没有这个限制**。
 
-MCP 是本地进程，**没有这个限制**，能覆盖的通道反而更多。代价是它没有界面——界面就是 Agent 本身。
+代价是它没有界面——界面就是 Agent 本身。
 
 ## 钥匙归你自己（这是全部设计的前提）
 
@@ -52,8 +52,6 @@ MCP 是本地进程，**没有这个限制**，能覆盖的通道反而更多。
 }
 ```
 
-Hana 会在首次连接时把工具清单填进 `tools[]`，其余字段保持默认即可。
-
 ### Claude Desktop / 其他 MCP 宿主
 
 ```json
@@ -74,32 +72,47 @@ Hana 会在首次连接时把工具清单填进 `tools[]`，其余字段保持�
 npx -y github:Elysia07291207/image-booth-mcp
 ```
 
-（前提是仓库已推上去。没发布到 npm 也能用，`npx github:` 直接拉仓库跑。）
+（没发布到 npm 也能用，`npx github:` 直接拉仓库跑。）
 
-## 通道与 key
+## 通道与环境变量
 
-| 通道 | env 变量 | 模型 |
-|:--|:--|:--|
-| 阿里云百炼 · 通义万相 | `DASHSCOPE_API_KEY` | `wan2.7-image-pro` / `wan2.7-image` / `qwen-image-2.0-pro` / `qwen-image-plus` |
-| 火山方舟 · 豆包 Seedream | `ARK_API_KEY` | `doubao-seedream-4-5-251128` / `doubao-seedream-5-0-260128` / `doubao-seedream-4-0-250828` |
+| 通道 | key 变量 | 可选 base 变量 | 模型 | 状态 |
+|:--|:--|:--|:--|:--|
+| 阿里云百炼 · 通义万相 / 千问图像 | `DASHSCOPE_API_KEY` | `DASHSCOPE_BASE_URL` | `wan2.7-image-pro` / `wan2.7-image` / `qwen-image-3.0-pro` / `qwen-image-2.1-pro` | **已真调通** |
+| 火山方舟 · 豆包 Seedream | `ARK_API_KEY` | `ARK_BASE_URL` | `doubao-seedream-4-5-251128` / `doubao-seedream-5-0-260128` / `doubao-seedream-4-0-250828` | 形状按官方接口写，尚未真调 |
 
 填一个就够；两个都填，两个都能用。
+
+`DASHSCOPE_BASE_URL` 不填时用通用的 `https://dashscope.aliyuncs.com/api/v1`。如果你的 key 属于某个**业务空间**，百度一下就知道该填什么，形如：
+
+```
+https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1
+```
 
 ## 两个工具
 
 | 工具 | 作用 |
 |:--|:--|
 | `image_channels` | 看认得哪些通道、哪些配了 key。**只读、不花钱**，报错先看它 |
-| `image_generate` | 出图。`prompt` 必填；`provider` / `model` / `size`（`1:1` / `3:4` / `16:9`）可省；给了 `save_dir` 就顺手存本地并返回绝对路径 |
+| `image_generate` | 出图，返回直链；给了 `save_dir` 就顺手存本地并返回绝对路径 |
 
-两家的请求形状不一样，所以在 `index.mjs` 里逐条写清楚了，没硬抽象成「通用格式」：
+### `image_generate` 参数
 
-- **百炼**是任务制：先拿 `task_id`，再轮询 `/tasks/{id}`（最多等 3 分钟）
-- **方舟**是 OpenAI 形状，一次请求直接回 url
+| 参数 | 说明 |
+|:--|:--|
+| `prompt` | **必填**，正向提示词 |
+| `negative_prompt` | 反向提示词（不想出现什么）。dashscope 支持 |
+| `provider` | `dashscope` / `ark`，省略则自动选 |
+| `model` | 省略用该通道第一个 |
+| `size` | `1:1` / `3:4` / `16:9`，或直接给像素 `1024*1024`。默认 `1:1` |
+| `n` | 张数，1~4，默认 1 |
+| `watermark` | 是否要厂商水印，默认 `false` |
+| `thinking` | dashscope 的深度思考模式，更慢通常更贴提示词，默认不开 |
+| `save_dir` | 把图存到这个目录（不存在会自动建） |
 
 ## 自己手测（不用装任何平台）
 
-这个服务说 MCP over stdio，一行一条 JSON-RPC。所以可以直接喂它：
+这个服务说 MCP over stdio，一行一条 JSON-RPC，可以直接喂它：
 
 ```bash
 printf '%s\n' \
@@ -110,12 +123,29 @@ printf '%s\n' \
   | node index.mjs
 ```
 
-应该看到：`initialize` 回协议版本与 serverInfo、通知**不回**、`tools/list` 回两个工具、`image_channels` 回通道表（没配 key 时 `hasKey: false`）。
+## 排错：看到这些错误码意味着什么
+
+服务会把厂商的原始回话**原样**带出来，另外附一行「接下来该干什么」。常见的几种：
+
+| 你看到的 | 真正的意思 | 怎么办 |
+|:--|:--|:--|
+| `Arrearage` | 账号在这条链路上被判欠费 / 余额为 0，且免费额度已用尽 | 去控制台看余额，充值或换一个还有额度的模型 |
+| `AccessDenied.Unpurchased` | 这个模型在账号下**没开通** | 换一个已开通的模型，或去控制台开通它 |
+| `InvalidParameter: url error` | 端点或请求形状写错了（老版 `text2image/image-synthesis` + `input.prompt` 会踩这个） | 本服务已改用 `image-generation/generation` + `input.messages`；自己拼请求时照抄 `index.mjs` 里那段 |
+| `AllocationQuota.FreeTierOnly` | 你开了「免费额度用完即停」，额度见了底 | 关掉它（会开始按量计费），或等额度刷新 |
 
 ## 已知与未知
 
-- **已验证**：MCP 协议层（`initialize` / `notifications/initialized` / `tools/list` / `tools/call`）实测回执正确；未配 key 时失败干净（`isError: true` + 可照做的提示），不假装成功；两个通道的 HTTP 形状与鉴权方式按官方接口写成。
-- **未验证**：一次**真实出图**。写这份代码的机器上没有可用的 key，所以没跑。如果你跑出问题，把返回里的错误原文贴出来——厂商的原话会原样透出来，模型名写错、尺寸不支持、额度不够，答案都在那行字里。
+**已验证**
+
+- MCP 协议层（`initialize` / `notifications/initialized` / `tools/list` / `tools/call`）回执正确；未配 key 时失败干净（`isError: true` + 可照做的提示），不假装成功。
+- **dashscope 通道真出过图**：`wan2.7-image-pro` / `1024*1024` / 约 22 秒 / 1.6 MB，返回直链并能落盘。
+- 端点形状以真调用为准，不是照文档抄的：`POST /services/aigc/image-generation/generation`，body 用 `input.messages`，图在 `output.choices[].message.content[]` 里标 `type:"image"`。
+
+**未验证**
+
+- `ark`（火山方舟）通道：请求形状按官方接口写，手上没有 key，没真跑过。
+- `3:4` / `16:9` 两档画幅：像素值取自常见支持范围，未逐一实测。写错的话厂商会明说，原文会透给你。
 
 ## 许可
 
