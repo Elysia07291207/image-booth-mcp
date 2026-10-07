@@ -1,0 +1,18 @@
+# 依赖（这个项目零依赖，但别人 clone 之后可能装出东西）
+node_modules/
+
+# 钥匙与本地配置：绝对不要提交
+.env
+.env.*
+*.key
+config.local.json
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 日志与临时
+*.log
+tmp/
